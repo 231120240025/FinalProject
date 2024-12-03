@@ -7,6 +7,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import searchengine.services.IndexingService;
 
+import java.util.HashMap;
 import java.util.Map;
 
 @Controller
@@ -23,19 +24,20 @@ public class DefaultController {
     public String index() {
         return "index";
     }
+
     @GetMapping("/api/startIndexing")
-    public ResponseEntity<?> startIndexing() {
+    public ResponseEntity<Map<String, Object>> startIndexing() {
         if (indexingService.isIndexingInProgress()) {
-            return ResponseEntity.badRequest().body(
-                    Map.of(
-                            "result", false,
-                            "error", "Индексация уже запущена"
-                    )
-            );
+            Map<String, Object> errorResponse = new HashMap<>();
+            errorResponse.put("result", false);
+            errorResponse.put("error", "Индексация уже запущена");
+            return ResponseEntity.badRequest().body(errorResponse);
         }
+
         indexingService.startFullIndexing();
-        return ResponseEntity.ok(
-                Map.of("result", true)
-        );
+
+        Map<String, Object> successResponse = new HashMap<>();
+        successResponse.put("result", true);
+        return ResponseEntity.ok(successResponse);
     }
 }
