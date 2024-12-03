@@ -16,15 +16,9 @@ spring:
 
 indexing-settings:
   sites:
-    - url: https://www.lenta.ru
-      name: Лента.ру
-    - url: https://www.skillbox.ru
-      name: Skillbox
     - url: https://www.playback.ru
       name: PlayBack.Ru
     - url: https://www.ipfran.ru
       name: IP Fran
-    - url: https://www.dombulgakova.ru
-      name: Dom Bulgakova
     - url: https://www.svetlovka.ru
       name: Svetlovka

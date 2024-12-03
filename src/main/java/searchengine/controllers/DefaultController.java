@@ -1,17 +1,19 @@
 package searchengine.controllers;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.ResponseBody;
 import searchengine.services.IndexingService;
 
-import java.util.HashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.Map;
 
-@RestController
+@Controller
 public class DefaultController {
 
     private final IndexingService indexingService;
+    private final AtomicBoolean isIndexing = new AtomicBoolean(false);
 
     @Autowired
     public DefaultController(IndexingService indexingService) {
@@ -19,15 +21,26 @@ public class DefaultController {
     }
 
     @GetMapping("/api/startIndexing")
+    @ResponseBody
     public Map<String, Object> startIndexing() {
-        Map<String, Object> response = new HashMap<>();
-        if (indexingService.isIndexing()) {
-            response.put("result", false);
-            response.put("error", "Индексация уже запущена");
-        } else {
-            indexingService.startIndexing();
-            response.put("result", true);
+        if (isIndexing.get()) {
+            return Map.of(
+                    "result", false,
+                    "error", "Индексация уже запущена"
+            );
         }
-        return response;
+
+        isIndexing.set(true);
+        try {
+            indexingService.startFullIndexing();
+            return Map.of("result", true);
+        } catch (Exception e) {
+            return Map.of(
+                    "result", false,
+                    "error", "Ошибка при запуске индексации: " + e.getMessage()
+            );
+        } finally {
+            isIndexing.set(false);
+        }
     }
 }
