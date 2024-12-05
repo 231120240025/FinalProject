@@ -20,7 +20,7 @@ public class Page {
     @JoinColumn(name = "site_id", nullable = false)
     private Site site;
 
-    @Column(length = 255, nullable = false) // Оптимизировано для индекса
+    @Column(length = 255, nullable = false)
     private String path;
 
     @Column(nullable = false)

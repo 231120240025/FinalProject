@@ -4,8 +4,8 @@ import jakarta.persistence.*;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import lombok.AllArgsConstructor;
-
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Entity
 @Table(name = "site")
@@ -28,9 +28,12 @@ public class Site {
     @Column(columnDefinition = "TEXT")
     private String lastError;
 
-    @Column(length = 255, nullable = false) // Упрощённый синтаксис для VARCHAR(255)
+    @Column(length = 255, nullable = false, unique = true)
     private String url;
 
-    @Column(length = 255, nullable = false) // Упрощённый синтаксис для VARCHAR(255)
+    @Column(length = 255, nullable = false)
     private String name;
+
+    @OneToMany(mappedBy = "site", cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<Page> pages;
 }
