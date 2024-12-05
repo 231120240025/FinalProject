@@ -7,11 +7,20 @@ import org.springframework.transaction.annotation.Transactional;
 import searchengine.config.Site;
 import searchengine.config.SitesList;
 import searchengine.model.IndexingStatus;
+import searchengine.model.Page;
 import searchengine.repository.PageRepository;
 import searchengine.repository.SiteRepository;
 
+import java.io.IOException;
+import java.net.URL;
 import java.time.LocalDateTime;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
+import org.jsoup.Jsoup;
+import org.jsoup.nodes.Document;
+import org.jsoup.nodes.Element;
+import org.jsoup.select.Elements;
 
 @Service
 public class IndexingService {
@@ -22,7 +31,7 @@ public class IndexingService {
     private final SiteRepository siteRepository;
     private final PageRepository pageRepository;
 
-    private volatile boolean indexingInProgress = false; // Обновлено для корректной работы с многопоточностью
+    private volatile boolean indexingInProgress = false;
 
     public IndexingService(SitesList sitesList, SiteRepository siteRepository, PageRepository pageRepository) {
         this.sitesList = sitesList;
@@ -58,9 +67,10 @@ public class IndexingService {
         searchengine.model.Site site = siteRepository.findByUrl(siteUrl);
         if (site != null) {
             logger.info("Удаление данных для сайта: {}", siteUrl);
-            pageRepository.deleteAllBySiteId(site.getId()); // Удаляем страницы, связанные с сайтом
-            siteRepository.delete(site); // Удаляем сам сайт
-            logger.info("Данные для сайта {} удалены.", siteUrl);
+            int pagesDeleted = pageRepository.deleteAllBySiteId(site.getId());
+            siteRepository.delete(site);
+            logger.info("Удалено {} записей из таблицы page для сайта {}.", pagesDeleted, siteUrl);
+            logger.info("Запись о сайте {} удалена из таблицы site.", siteUrl);
         } else {
             logger.info("Данные для сайта {} отсутствуют.", siteUrl);
         }
@@ -76,25 +86,17 @@ public class IndexingService {
         for (Site site : sites) {
             logger.info("Индексация сайта: {} ({})", site.getName(), site.getUrl());
             try {
-                // Удаляем старые данные
                 deleteSiteData(site.getUrl());
-
-                // Создаем новую запись о сайте
                 searchengine.model.Site newSite = new searchengine.model.Site();
                 newSite.setName(site.getName());
                 newSite.setUrl(site.getUrl());
                 newSite.setStatus(IndexingStatus.INDEXING);
                 newSite.setStatusTime(LocalDateTime.now());
                 siteRepository.save(newSite);
-
-                // Логика индексации сайта (заменить на реальную)
-                simulateIndexing(newSite);
-
-                // Обновляем статус сайта
+                crawlAndIndexPages(newSite, site.getUrl(), new HashSet<>());
                 newSite.setStatus(IndexingStatus.INDEXED);
                 newSite.setStatusTime(LocalDateTime.now());
                 siteRepository.save(newSite);
-
                 logger.info("Сайт {} успешно проиндексирован.", site.getName());
             } catch (Exception e) {
                 logger.error("Ошибка при индексации сайта {}: {}", site.getName(), e.getMessage());
@@ -103,10 +105,54 @@ public class IndexingService {
         }
     }
 
-    private void simulateIndexing(searchengine.model.Site site) throws InterruptedException {
-        // Симуляция индексации: заменить на логику парсинга сайта и добавления страниц
-        Thread.sleep(2000);
-        logger.info("Сайт {} ({}) обработан.", site.getName(), site.getUrl());
+    private void crawlAndIndexPages(searchengine.model.Site site, String url, Set<String> visitedUrls) {
+        if (visitedUrls.contains(url)) {
+            return;
+        }
+        visitedUrls.add(url);
+
+        try {
+            String contentType = Jsoup.connect(url).ignoreContentType(true).execute().contentType();
+            int statusCode = Jsoup.connect(url).ignoreContentType(true).execute().statusCode();
+
+            if (contentType != null && contentType.startsWith("image/")) {
+                Page page = new Page();
+                page.setSite(site);
+                page.setPath(new URL(url).getPath());
+                page.setCode(statusCode);
+                page.setContent("Image content: " + contentType);
+                pageRepository.save(page);
+                logger.info("Изображение добавлено: {}", url);
+                return;
+            }
+
+            if (contentType == null || !(contentType.startsWith("text/") || contentType.contains("xml"))) {
+                logger.warn("Пропуск URL {}: неподдерживаемый тип контента {}", url, contentType);
+                return;
+            }
+
+            Document document = Jsoup.connect(url).get();
+            String content = document.html();
+
+            Page page = new Page();
+            page.setSite(site);
+            page.setPath(new URL(url).getPath());
+            page.setCode(statusCode);
+            page.setContent(content);
+            pageRepository.save(page);
+
+            logger.info("Страница добавлена: {}", url);
+
+            Elements links = document.select("a[href]");
+            for (Element link : links) {
+                String childUrl = link.absUrl("href");
+                if (childUrl.startsWith(site.getUrl())) {
+                    crawlAndIndexPages(site, childUrl, visitedUrls);
+                }
+            }
+        } catch (IOException e) {
+            logger.error("Ошибка при обработке URL {}: {}", url, e.getMessage());
+        }
     }
 
     @Transactional
