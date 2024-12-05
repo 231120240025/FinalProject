@@ -55,7 +55,6 @@ public class IndexingService {
             performIndexing();
         } catch (Exception e) {
             logger.error("Ошибка во время индексации: ", e);
-            throw e;
         } finally {
             indexingInProgress = false;
             logger.info("Индексация завершена.");
@@ -94,12 +93,9 @@ public class IndexingService {
                 newSite.setStatusTime(LocalDateTime.now());
                 siteRepository.save(newSite);
                 crawlAndIndexPages(newSite, site.getUrl(), new HashSet<>());
-                newSite.setStatus(IndexingStatus.INDEXED);
-                newSite.setStatusTime(LocalDateTime.now());
-                siteRepository.save(newSite);
+                updateSiteStatusToIndexed(newSite);
                 logger.info("Сайт {} успешно проиндексирован.", site.getName());
             } catch (Exception e) {
-                logger.error("Ошибка при индексации сайта {}: {}", site.getName(), e.getMessage());
                 handleIndexingError(site.getUrl(), e);
             }
         }
@@ -123,11 +119,13 @@ public class IndexingService {
                 page.setContent("Image content: " + contentType);
                 pageRepository.save(page);
                 logger.info("Изображение добавлено: {}", url);
+                updateSiteStatusTime(site);
                 return;
             }
 
             if (contentType == null || !(contentType.startsWith("text/") || contentType.contains("xml"))) {
                 logger.warn("Пропуск URL {}: неподдерживаемый тип контента {}", url, contentType);
+                updateSiteStatusTime(site);
                 return;
             }
 
@@ -142,6 +140,7 @@ public class IndexingService {
             pageRepository.save(page);
 
             logger.info("Страница добавлена: {}", url);
+            updateSiteStatusTime(site);
 
             Elements links = document.select("a[href]");
             for (Element link : links) {
@@ -152,10 +151,23 @@ public class IndexingService {
             }
         } catch (IOException e) {
             logger.error("Ошибка при обработке URL {}: {}", url, e.getMessage());
+            updateSiteStatusTime(site);
         }
     }
 
-    @Transactional
+    private void updateSiteStatusToIndexed(searchengine.model.Site site) {
+        site.setStatus(IndexingStatus.INDEXED);
+        site.setStatusTime(LocalDateTime.now());
+        siteRepository.save(site);
+        logger.info("Сайт {} изменил статус на INDEXED.", site.getUrl());
+    }
+
+    private void updateSiteStatusTime(searchengine.model.Site site) {
+        site.setStatusTime(LocalDateTime.now());
+        siteRepository.save(site);
+        logger.info("Обновлено время status_time для сайта {}: {}", site.getUrl(), site.getStatusTime());
+    }
+
     private void handleIndexingError(String siteUrl, Exception e) {
         searchengine.model.Site site = siteRepository.findByUrl(siteUrl);
         if (site != null) {
@@ -163,6 +175,7 @@ public class IndexingService {
             site.setLastError(e.getMessage());
             site.setStatusTime(LocalDateTime.now());
             siteRepository.save(site);
+            logger.error("Индексация сайта {} завершилась ошибкой: {}", site.getUrl(), e.getMessage());
         }
     }
 }
