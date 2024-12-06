@@ -40,4 +40,20 @@ public class DefaultController {
         successResponse.put("result", true);
         return ResponseEntity.ok(successResponse);
     }
+
+    @GetMapping("/api/stopIndexing")
+    public ResponseEntity<Map<String, Object>> stopIndexing() {
+        if (!indexingService.isIndexingInProgress()) {
+            Map<String, Object> errorResponse = new HashMap<>();
+            errorResponse.put("result", false);
+            errorResponse.put("error", "Индексация не запущена");
+            return ResponseEntity.badRequest().body(errorResponse);
+        }
+
+        indexingService.stopIndexing();
+
+        Map<String, Object> successResponse = new HashMap<>();
+        successResponse.put("result", true);
+        return ResponseEntity.ok(successResponse);
+    }
 }

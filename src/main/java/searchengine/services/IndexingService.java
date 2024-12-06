@@ -36,6 +36,8 @@ public class IndexingService {
     private final PageRepository pageRepository;
 
     private volatile boolean indexingInProgress = false;
+    private ExecutorService executorService;
+    private ForkJoinPool forkJoinPool;
 
     public IndexingService(SitesList sitesList, SiteRepository siteRepository, PageRepository pageRepository) {
         this.sitesList = sitesList;
@@ -65,6 +67,22 @@ public class IndexingService {
         }
     }
 
+    public synchronized void stopIndexing() {
+        if (!indexingInProgress) {
+            logger.warn("Попытка остановить индексацию, которая не выполняется.");
+            return;
+        }
+        logger.info("Остановка индексации по запросу пользователя.");
+        indexingInProgress = false;
+        if (executorService != null) {
+            executorService.shutdownNow();
+        }
+        if (forkJoinPool != null) {
+            forkJoinPool.shutdownNow();
+        }
+        updateSitesStatusToFailed("Индексация остановлена пользователем");
+    }
+
     @Transactional
     private void deleteSiteData(String siteUrl) {
         searchengine.model.Site site = siteRepository.findByUrl(siteUrl);
@@ -85,7 +103,7 @@ public class IndexingService {
             return;
         }
 
-        ExecutorService executorService = Executors.newFixedThreadPool(sites.size());
+        executorService = Executors.newFixedThreadPool(sites.size());
         try {
             for (Site site : sites) {
                 executorService.submit(() -> {
@@ -122,7 +140,7 @@ public class IndexingService {
     }
 
     private void crawlAndIndexPages(searchengine.model.Site site, String startUrl) {
-        ForkJoinPool forkJoinPool = new ForkJoinPool();
+        forkJoinPool = new ForkJoinPool();
         try {
             forkJoinPool.invoke(new PageCrawler(site, startUrl, new HashSet<>()));
         } finally {
@@ -226,6 +244,17 @@ public class IndexingService {
             site.setStatusTime(LocalDateTime.now());
             siteRepository.save(site);
             logger.error("Индексация сайта {} завершилась ошибкой: {}", site.getUrl(), e.getMessage());
+        }
+    }
+
+    private void updateSitesStatusToFailed(String errorMessage) {
+        List<searchengine.model.Site> sites = siteRepository.findAllByStatus(IndexingStatus.INDEXING);
+        for (searchengine.model.Site site : sites) {
+            site.setStatus(IndexingStatus.FAILED);
+            site.setLastError(errorMessage);
+            site.setStatusTime(LocalDateTime.now());
+            siteRepository.save(site);
+            logger.info("Сайт {} изменил статус на FAILED: {}", site.getUrl(), errorMessage);
         }
     }
 }
