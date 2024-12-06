@@ -121,7 +121,6 @@ public class IndexingService {
         }
     }
 
-
     private void crawlAndIndexPages(searchengine.model.Site site, String startUrl) {
         ForkJoinPool forkJoinPool = new ForkJoinPool();
         try {
@@ -152,8 +151,24 @@ public class IndexingService {
             }
 
             try {
-                String contentType = Jsoup.connect(url).ignoreContentType(true).execute().contentType();
-                int statusCode = Jsoup.connect(url).ignoreContentType(true).execute().statusCode();
+                // Добавляем задержку для избежания блокировки
+                long delay = 500 + new Random().nextInt(4500); // Задержка от 0.5 до 5 секунд
+                logger.info("Задержка перед запросом: {} ms для URL: {}", delay, url);
+                Thread.sleep(delay);
+
+                // Обращение с фейковым User-Agent и реферером
+                String contentType = Jsoup.connect(url)
+                        .userAgent("Mozilla/5.0 (Windows; U; WindowsNT 5.1; en-US; rv1.8.1.6) Gecko/20070725 Firefox/2.0.0.6")
+                        .referrer("http://www.google.com")
+                        .ignoreContentType(true)
+                        .execute()
+                        .contentType();
+                int statusCode = Jsoup.connect(url)
+                        .userAgent("Mozilla/5.0 (Windows; U; WindowsNT 5.1; en-US; rv1.8.1.6) Gecko/20070725 Firefox/2.0.0.6")
+                        .referrer("http://www.google.com")
+                        .ignoreContentType(true)
+                        .execute()
+                        .statusCode();
 
                 if (contentType != null && contentType.startsWith("image/")) {
                     Page page = new Page();
@@ -166,7 +181,10 @@ public class IndexingService {
                     return;
                 }
 
-                Document document = Jsoup.connect(url).get();
+                Document document = Jsoup.connect(url)
+                        .userAgent("Mozilla/5.0 (Windows; U; WindowsNT 5.1; en-US; rv1.8.1.6) Gecko/20070725 Firefox/2.0.0.6")
+                        .referrer("http://www.google.com")
+                        .get();
                 String content = document.html();
 
                 Page page = new Page();
@@ -187,7 +205,7 @@ public class IndexingService {
                     }
                 }
                 invokeAll(subtasks);
-            } catch (IOException e) {
+            } catch (IOException | InterruptedException e) {
                 logger.error("Ошибка при обработке URL {}: {}", url, e.getMessage());
             }
         }
