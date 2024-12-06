@@ -15,8 +15,12 @@ import java.io.IOException;
 import java.net.URL;
 import java.time.LocalDateTime;
 import java.util.*;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.RecursiveAction;
+import java.util.concurrent.TimeUnit;
+
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
@@ -81,24 +85,42 @@ public class IndexingService {
             return;
         }
 
-        for (Site site : sites) {
-            logger.info("Индексация сайта: {} ({})", site.getName(), site.getUrl());
+        ExecutorService executorService = Executors.newFixedThreadPool(sites.size());
+        try {
+            for (Site site : sites) {
+                executorService.submit(() -> {
+                    logger.info("Индексация сайта: {} ({})", site.getName(), site.getUrl());
+                    try {
+                        deleteSiteData(site.getUrl());
+                        searchengine.model.Site newSite = new searchengine.model.Site();
+                        newSite.setName(site.getName());
+                        newSite.setUrl(site.getUrl());
+                        newSite.setStatus(IndexingStatus.INDEXING);
+                        newSite.setStatusTime(LocalDateTime.now());
+                        siteRepository.save(newSite);
+                        crawlAndIndexPages(newSite, site.getUrl());
+                        updateSiteStatusToIndexed(newSite);
+                        logger.info("Сайт {} успешно проиндексирован.", site.getName());
+                    } catch (Exception e) {
+                        handleIndexingError(site.getUrl(), e);
+                    }
+                });
+            }
+        } finally {
+            executorService.shutdown();
             try {
-                deleteSiteData(site.getUrl());
-                searchengine.model.Site newSite = new searchengine.model.Site();
-                newSite.setName(site.getName());
-                newSite.setUrl(site.getUrl());
-                newSite.setStatus(IndexingStatus.INDEXING);
-                newSite.setStatusTime(LocalDateTime.now());
-                siteRepository.save(newSite);
-                crawlAndIndexPages(newSite, site.getUrl());
-                updateSiteStatusToIndexed(newSite);
-                logger.info("Сайт {} успешно проиндексирован.", site.getName());
-            } catch (Exception e) {
-                handleIndexingError(site.getUrl(), e);
+                if (!executorService.awaitTermination(1, TimeUnit.HOURS)) {
+                    executorService.shutdownNow();
+                    logger.error("Превышено время ожидания завершения индексации.");
+                }
+            } catch (InterruptedException e) {
+                executorService.shutdownNow();
+                logger.error("Индексация была прервана: {}", e.getMessage());
+                Thread.currentThread().interrupt();
             }
         }
     }
+
 
     private void crawlAndIndexPages(searchengine.model.Site site, String startUrl) {
         ForkJoinPool forkJoinPool = new ForkJoinPool();
