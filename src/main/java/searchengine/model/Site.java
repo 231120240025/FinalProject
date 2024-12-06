@@ -5,6 +5,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 import lombok.AllArgsConstructor;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 
 @Entity
@@ -35,5 +36,24 @@ public class Site {
     private String name;
 
     @OneToMany(mappedBy = "site", cascade = CascadeType.ALL, orphanRemoval = true)
-    private List<Page> pages;
+    private List<Page> pages = new ArrayList<>();
+
+    // Добавление страницы
+    public void addPage(Page page) {
+        pages.add(page);
+        page.setSite(this);
+    }
+
+    // Удаление страницы
+    public void removePage(Page page) {
+        pages.remove(page);
+        page.setSite(null);
+    }
+
+    // Очистка всех страниц
+    public void clearPages() {
+        for (Page page : new ArrayList<>(pages)) {
+            removePage(page);
+        }
+    }
 }

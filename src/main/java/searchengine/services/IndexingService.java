@@ -11,12 +11,11 @@ import searchengine.model.Page;
 import searchengine.repository.PageRepository;
 import searchengine.repository.SiteRepository;
 
-import java.io.IOException;
 import java.net.URL;
 import java.time.LocalDateTime;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
+import java.util.*;
+import java.util.concurrent.ForkJoinPool;
+import java.util.concurrent.RecursiveAction;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
@@ -69,7 +68,6 @@ public class IndexingService {
             int pagesDeleted = pageRepository.deleteAllBySiteId(site.getId());
             siteRepository.delete(site);
             logger.info("Удалено {} записей из таблицы page для сайта {}.", pagesDeleted, siteUrl);
-            logger.info("Запись о сайте {} удалена из таблицы site.", siteUrl);
         } else {
             logger.info("Данные для сайта {} отсутствуют.", siteUrl);
         }
@@ -102,56 +100,60 @@ public class IndexingService {
     }
 
     private void crawlAndIndexPages(searchengine.model.Site site, String url, Set<String> visitedUrls) {
-        if (visitedUrls.contains(url)) {
-            return;
-        }
-        visitedUrls.add(url);
-
+        ForkJoinPool forkJoinPool = new ForkJoinPool();
         try {
-            String contentType = Jsoup.connect(url).ignoreContentType(true).execute().contentType();
-            int statusCode = Jsoup.connect(url).ignoreContentType(true).execute().statusCode();
+            forkJoinPool.invoke(new PageCrawler(site, url, visitedUrls));
+        } finally {
+            forkJoinPool.shutdown();
+        }
+    }
 
-            if (contentType != null && contentType.startsWith("image/")) {
+    private class PageCrawler extends RecursiveAction {
+        private final searchengine.model.Site site;
+        private final String url;
+        private final Set<String> visitedUrls;
+
+        public PageCrawler(searchengine.model.Site site, String url, Set<String> visitedUrls) {
+            this.site = site;
+            this.url = url;
+            this.visitedUrls = visitedUrls;
+        }
+
+        @Override
+        protected void compute() {
+            synchronized (visitedUrls) {
+                if (visitedUrls.contains(url)) {
+                    return;
+                }
+                visitedUrls.add(url);
+            }
+
+            try {
+                Document document = Jsoup.connect(url).get();
+                String content = document.html();
+                int statusCode = Jsoup.connect(url).ignoreContentType(true).execute().statusCode();
+
                 Page page = new Page();
                 page.setSite(site);
                 page.setPath(new URL(url).getPath());
                 page.setCode(statusCode);
-                page.setContent("Image content: " + contentType);
+                page.setContent(content);
                 pageRepository.save(page);
-                logger.info("Изображение добавлено: {}", url);
-                updateSiteStatusTime(site);
-                return;
-            }
 
-            if (contentType == null || !(contentType.startsWith("text/") || contentType.contains("xml"))) {
-                logger.warn("Пропуск URL {}: неподдерживаемый тип контента {}", url, contentType);
-                updateSiteStatusTime(site);
-                return;
-            }
+                logger.info("Страница добавлена: {}", url);
 
-            Document document = Jsoup.connect(url).get();
-            String content = document.html();
-
-            Page page = new Page();
-            page.setSite(site);
-            page.setPath(new URL(url).getPath());
-            page.setCode(statusCode);
-            page.setContent(content);
-            pageRepository.save(page);
-
-            logger.info("Страница добавлена: {}", url);
-            updateSiteStatusTime(site);
-
-            Elements links = document.select("a[href]");
-            for (Element link : links) {
-                String childUrl = link.absUrl("href");
-                if (childUrl.startsWith(site.getUrl())) {
-                    crawlAndIndexPages(site, childUrl, visitedUrls);
+                Elements links = document.select("a[href]");
+                List<PageCrawler> subtasks = new ArrayList<>();
+                for (Element link : links) {
+                    String childUrl = link.absUrl("href");
+                    if (childUrl.startsWith(site.getUrl())) {
+                        subtasks.add(new PageCrawler(site, childUrl, visitedUrls));
+                    }
                 }
+                invokeAll(subtasks);
+            } catch (Exception e) {
+                logger.error("Ошибка при обработке URL {}: {}", url, e.getMessage());
             }
-        } catch (IOException e) {
-            logger.error("Ошибка при обработке URL {}: {}", url, e.getMessage());
-            updateSiteStatusTime(site);
         }
     }
 
@@ -160,12 +162,6 @@ public class IndexingService {
         site.setStatusTime(LocalDateTime.now());
         siteRepository.save(site);
         logger.info("Сайт {} изменил статус на INDEXED.", site.getUrl());
-    }
-
-    private void updateSiteStatusTime(searchengine.model.Site site) {
-        site.setStatusTime(LocalDateTime.now());
-        siteRepository.save(site);
-        logger.info("Обновлено время status_time для сайта {}: {}", site.getUrl(), site.getStatusTime());
     }
 
     private void handleIndexingError(String siteUrl, Exception e) {
