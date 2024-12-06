@@ -11,6 +11,7 @@ import searchengine.model.Page;
 import searchengine.repository.PageRepository;
 import searchengine.repository.SiteRepository;
 
+import java.io.IOException;
 import java.net.URL;
 import java.time.LocalDateTime;
 import java.util.*;
@@ -90,7 +91,7 @@ public class IndexingService {
                 newSite.setStatus(IndexingStatus.INDEXING);
                 newSite.setStatusTime(LocalDateTime.now());
                 siteRepository.save(newSite);
-                crawlAndIndexPages(newSite, site.getUrl(), new HashSet<>());
+                crawlAndIndexPages(newSite, site.getUrl());
                 updateSiteStatusToIndexed(newSite);
                 logger.info("Сайт {} успешно проиндексирован.", site.getName());
             } catch (Exception e) {
@@ -99,10 +100,10 @@ public class IndexingService {
         }
     }
 
-    private void crawlAndIndexPages(searchengine.model.Site site, String url, Set<String> visitedUrls) {
+    private void crawlAndIndexPages(searchengine.model.Site site, String startUrl) {
         ForkJoinPool forkJoinPool = new ForkJoinPool();
         try {
-            forkJoinPool.invoke(new PageCrawler(site, url, visitedUrls));
+            forkJoinPool.invoke(new PageCrawler(site, startUrl, new HashSet<>()));
         } finally {
             forkJoinPool.shutdown();
         }
@@ -129,9 +130,22 @@ public class IndexingService {
             }
 
             try {
+                String contentType = Jsoup.connect(url).ignoreContentType(true).execute().contentType();
+                int statusCode = Jsoup.connect(url).ignoreContentType(true).execute().statusCode();
+
+                if (contentType != null && contentType.startsWith("image/")) {
+                    Page page = new Page();
+                    page.setSite(site);
+                    page.setPath(new URL(url).getPath());
+                    page.setCode(statusCode);
+                    page.setContent("Image content: " + contentType);
+                    pageRepository.save(page);
+                    logger.info("Изображение добавлено: {}", url);
+                    return;
+                }
+
                 Document document = Jsoup.connect(url).get();
                 String content = document.html();
-                int statusCode = Jsoup.connect(url).ignoreContentType(true).execute().statusCode();
 
                 Page page = new Page();
                 page.setSite(site);
@@ -151,7 +165,7 @@ public class IndexingService {
                     }
                 }
                 invokeAll(subtasks);
-            } catch (Exception e) {
+            } catch (IOException e) {
                 logger.error("Ошибка при обработке URL {}: {}", url, e.getMessage());
             }
         }
